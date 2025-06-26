@@ -17,26 +17,46 @@ class ModelRunner:
     def __init__(self, config: Config, rank: int, event: Event | list[Event]):
         self.config = config
         hf_config = config.hf_config
+        # 每个KV缓存块的大小，较大的块可以减少缓存切换的次数，但会占用更多的内存，造成显存的浪费
         self.block_size = config.kvcache_block_size
+        # 是否强制使用eager模式，如果为True，则不使用CUDAGraph，而是直接执行模型计算
         self.enforce_eager = config.enforce_eager
+        # 进行TP时总共使用的GPU数量
         self.world_size = config.tensor_parallel_size
+        # TP并行时主进程的rank编号
         self.rank = rank
+        # 用于进程间通信的事件对象，例如：在TP并行时，用于call函数调用的通知
         self.event = event
-    
+        
+        
+        # 初始化分布式推理，使用NCCL作为通信后端，使用TCP协议进行通信，
+        # world_size为TP并行时总共使用的GPU数量，
+        # rank为TP并行时主进程的rank编号
         dist.init_process_group("nccl", "tcp://localhost:2333", world_size=self.world_size, rank=rank)
+        # 设置当前进程使用的GPU设备
         torch.cuda.set_device(rank)
+        # 设置默认的浮点数类型
         default_dtype = torch.get_default_dtype()
+        # 设置默认的浮点数类型
         torch.set_default_dtype(hf_config.torch_dtype)
+        # 设置默认的设备为GPU
         torch.set_default_device("cuda")
+        # 加载模型，加载模型时使用cuda设备加载
         self.model = Qwen3ForCausalLM(hf_config)
+        # 加载模型权重
         load_model(self.model, config.model)
+        # 初始化采样器
         self.sampler = Sampler()
+        # 分配KV缓存
         self.allocate_kv_cache(config.gpu_memory_utilization)
         if not self.enforce_eager:
             self.capture_cudagraph()
+            
+        # 恢复默认的设备和浮点数类型
         torch.set_default_device("cpu")
         torch.set_default_dtype(default_dtype)
 
+        # 分配共享内存，用于TP并行时进程间通信，主要是用于发送函数调用信息    
         if self.world_size > 1:
             if rank == 0:
                 self.shm = SharedMemory(name="nanovllm", create=True, size=2**20)
@@ -92,13 +112,31 @@ class ModelRunner:
     def allocate_kv_cache(self, gpu_memory_utilization):
         config = self.config
         hf_config = config.hf_config
+        # 获取当前GPU的空闲内存和总内存
         free, total = torch.cuda.mem_get_info()
         used = total - free
+        # 计算每个gpu分配多少个注意力头
         num_kv_heads = hf_config.num_key_value_heads // self.world_size
+        # 根据注意力计算每个块实际需要用到的显存大小bytes，需要乘以2是因为kv_cache需要q和k两个缓存
         block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * num_kv_heads * hf_config.head_dim * hf_config.torch_dtype.itemsize
-        config.num_kvcache_blocks = int(total * gpu_memory_utilization - used) // block_bytes
+        
+        # 计算可用于KV缓存的内存
+        available_memory = int(total * gpu_memory_utilization - used)
+        config.num_kvcache_blocks = available_memory // block_bytes
+        
+        # 检查是否有足够的内存分配KV缓存
+        if config.num_kvcache_blocks <= 0:
+            # 如果内存不足
+            print(f"警告: GPU内存不足，只能分配 {config.num_kvcache_blocks} 个KV缓存块")
+            print(f"总内存: {total / 1024**3:.2f}GB, 已使用: {used / 1024**3:.2f}GB")
+            print(f"可用内存: {available_memory / 1024**3:.2f}GB, 每块需要: {block_bytes / 1024**2:.2f}MB")
+            raise ValueError("GPU内存不足，无法分配KV缓存")
+        else:
+            print(f"分配 {config.num_kvcache_blocks} 个KV缓存块 (每块 {block_bytes / 1024**2:.2f}MB)")
+        
         self.kv_cache = torch.zeros(2, hf_config.num_hidden_layers, config.num_kvcache_blocks, self.block_size, num_kv_heads, hf_config.head_dim)
         layer_id = 0
+        # 将kv_cache分配给模型中的每个注意力层
         for module in self.model.modules():
             if hasattr(module, "k_cache") and hasattr(module, "v_cache"):
                 module.k_cache = self.kv_cache[0, layer_id]
