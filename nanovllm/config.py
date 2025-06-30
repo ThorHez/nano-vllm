@@ -7,9 +7,9 @@ from transformers import AutoConfig
 class Config:
     model: str
     max_num_batched_tokens: int = 32768
-    max_num_seqs: int = 512
+    max_num_seqs: int = 4096
     max_model_len: int = 4096
-    gpu_memory_utilization: float = 0.5
+    gpu_memory_utilization: float = 0.6
     tensor_parallel_size: int = 1
     enforce_eager: bool = False
     hf_config: AutoConfig | None = None
@@ -22,4 +22,6 @@ class Config:
         assert self.kvcache_block_size % 256 == 0
         assert 1 <= self.tensor_parallel_size <= 8
         self.hf_config = AutoConfig.from_pretrained(self.model)
-        self.max_model_len = min(self.max_model_len, self.hf_config.max_position_embeddings)
+        self.max_model_len = min(
+            self.max_model_len, self.hf_config.max_position_embeddings
+        )

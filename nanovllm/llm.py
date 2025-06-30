@@ -7,7 +7,7 @@ class LLM(LLMEngine):
     """
     高级LLM接口，提供便捷的生成方法
     """
-    
+
     def stream(
         self,
         prompt: str | list[int],
@@ -18,7 +18,7 @@ class LLM(LLMEngine):
     ) -> Iterator[Dict[str, Any]]:
         """
         便捷的单个提示流式生成方法
-        
+
         Args:
             prompt: 输入提示
             temperature: 采样温度
@@ -27,7 +27,7 @@ class LLM(LLMEngine):
             use_tqdm: 是否显示进度条
             tools: 可用工具列表
             tool_choice: 工具选择策略
-            
+
         Yields:
             生成的增量输出字典
         """
@@ -35,12 +35,10 @@ class LLM(LLMEngine):
             temperature=temperature,
             max_tokens=max_tokens,
             ignore_eos=ignore_eos,
-            tools=tools,
-            tool_choice=tool_choice
         )
-        
+
         yield from self.generate_stream(prompt, sampling_params, use_tqdm)
-    
+
     def stream_batch(
         self,
         prompts: list[str] | list[list[int]],
@@ -51,7 +49,7 @@ class LLM(LLMEngine):
     ) -> Iterator[Dict[int, Dict[str, Any]]]:
         """
         便捷的批量流式生成方法
-        
+
         Args:
             prompts: 输入提示列表
             temperature: 采样温度
@@ -60,7 +58,7 @@ class LLM(LLMEngine):
             use_tqdm: 是否显示进度条
             tools: 可用工具列表
             tool_choice: 工具选择策略
-            
+
         Yields:
             批量生成的增量输出字典
         """
@@ -68,9 +66,6 @@ class LLM(LLMEngine):
             temperature=temperature,
             max_tokens=max_tokens,
             ignore_eos=ignore_eos,
-            tools=tools,
-            tool_choice=tool_choice
         )
-        
-        yield from self.generate_stream_batch(prompts, sampling_params, use_tqdm)
 
+        yield from self.generate_stream_batch(prompts, sampling_params, use_tqdm)

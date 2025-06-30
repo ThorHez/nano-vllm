@@ -29,14 +29,22 @@ def store_kvcache_kernel(
     tl.store(v_cache_ptr + cache_offsets, value)
 
 
-def store_kvcache(key: torch.Tensor, value: torch.Tensor, k_cache: torch.Tensor, v_cache: torch.Tensor, slot_mapping: torch.Tensor):
+def store_kvcache(
+    key: torch.Tensor,
+    value: torch.Tensor,
+    k_cache: torch.Tensor,
+    v_cache: torch.Tensor,
+    slot_mapping: torch.Tensor,
+):
     N, num_heads, head_dim = key.shape
     D = num_heads * head_dim
     assert key.stride(-1) == 1 and value.stride(-1) == 1
     assert key.stride(1) == head_dim and value.stride(1) == head_dim
     assert k_cache.stride(1) == D and v_cache.stride(1) == D
     assert slot_mapping.numel() == N
-    store_kvcache_kernel[(N,)](key, key.stride(0), value, value.stride(0), k_cache, v_cache, slot_mapping, D)
+    store_kvcache_kernel[(N,)](
+        key, key.stride(0), value, value.stride(0), k_cache, v_cache, slot_mapping, D
+    )
 
 
 class Attention(nn.Module):
@@ -63,17 +71,40 @@ class Attention(nn.Module):
         context = get_context()
         k_cache = self.k_cache
         v_cache = self.v_cache
+
+        # 用来存储计算的k,v，slot_mapping是一个关键的索引映射数组
+        # 它将逻辑token位置映射到物理KV缓存槽位，实现了高效的分块KV缓存管理
+        # slot_mapping的优势:
+        # 1. 内存效率: 避免连续内存分配，支持内存碎片化管理
+        # 2. 灵活性: 支持不同长度序列的混合批处理
+        # 3. 缓存复用: 支持prefix caching，相同前缀可以共享缓存
+        # 4. 并行性: 每个token的存储位置独立，支持并行存储
+        # 5. 扩展性: 动态分配块，支持序列长度的动态增长
         store_kvcache(k, v, k_cache, v_cache, context.slot_mapping)
         if context.is_prefill:
-            if context.block_tables is not None:    # prefix cache
+            if context.block_tables is not None:  # prefix cache
                 k, v = k_cache, v_cache
-            o = flash_attn_varlen_func(q, k, v,
-                                       max_seqlen_q=context.max_seqlen_q, cu_seqlens_q=context.cu_seqlens_q,
-                                       max_seqlen_k=context.max_seqlen_k, cu_seqlens_k=context.cu_seqlens_k,
-                                       softmax_scale=self.scale, causal=True, block_table=context.block_tables)
-        else:    # decode
-            o = flash_attn_with_kvcache(q.unsqueeze(1), k_cache, v_cache,
-                                        cache_seqlens=context.context_lens, block_table=context.block_tables, 
-                                        softmax_scale=self.scale, causal=True)
+            o = flash_attn_varlen_func(
+                q,
+                k,
+                v,
+                max_seqlen_q=context.max_seqlen_q,
+                cu_seqlens_q=context.cu_seqlens_q,
+                max_seqlen_k=context.max_seqlen_k,
+                cu_seqlens_k=context.cu_seqlens_k,
+                softmax_scale=self.scale,
+                causal=True,
+                block_table=context.block_tables,
+            )
+        else:  # decode
+            o = flash_attn_with_kvcache(
+                q.unsqueeze(1),
+                k_cache,
+                v_cache,
+                cache_seqlens=context.context_lens,
+                block_table=context.block_tables,
+                softmax_scale=self.scale,
+                causal=True,
+            )
         o = o.view(-1, self.num_heads * self.head_dim)
         return o
