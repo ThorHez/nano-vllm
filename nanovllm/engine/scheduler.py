@@ -14,7 +14,9 @@ class Scheduler:
         self.block_manager = BlockManager(
             config.num_kvcache_blocks, config.kvcache_block_size
         )
+        # 用于存放等待prefill的序列
         self.waiting: deque[Sequence] = deque()
+        # 用于存放等待等待decode的序列
         self.running: deque[Sequence] = deque()
 
     def is_finished(self):
@@ -26,8 +28,11 @@ class Scheduler:
     def schedule(self) -> tuple[list[Sequence], bool]:
         # prefill
         scheduled_seqs = []
+        # todo 为什么需要设置单次最大的seq数量？
         num_seqs = 0
         num_batched_tokens = 0
+
+        # 一次取出足够多的序列用于批量推理
         while self.waiting and num_seqs < self.max_num_seqs:
             seq = self.waiting[0]
             if num_batched_tokens + len(
@@ -36,6 +41,7 @@ class Scheduler:
                 break
             num_seqs += 1
             self.block_manager.allocate(seq)
+            # 实际需要计算的seq - 已经计算的序列（存放在kv_cache中）
             num_batched_tokens += len(seq) - seq.num_cached_tokens
             seq.status = SequenceStatus.RUNNING
             self.waiting.popleft()
@@ -47,6 +53,8 @@ class Scheduler:
         # decode
         while self.running and num_seqs < self.max_num_seqs:
             seq = self.running.popleft()
+            # 如果block_manager不能分配额外的cache空间，那么将序列塞回等待的状态，同时删除掉相应的kv_cache，直到可以分配cache空间
+            # 给将要decode的seq
             while not self.block_manager.can_append(seq):
                 if self.running:
                     self.preempt(self.running.pop())
@@ -58,6 +66,7 @@ class Scheduler:
                 self.block_manager.may_append(seq)
                 scheduled_seqs.append(seq)
         assert scheduled_seqs
+        # 在running状态的序列优先执行，这样能有更低的时延
         self.running.extendleft(reversed(scheduled_seqs))
         return scheduled_seqs, False
 
