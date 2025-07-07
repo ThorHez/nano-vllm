@@ -167,13 +167,13 @@ class LLMEngine:
                     # seq.append_token(self.IM_END_TOKEN)
                     # seq.append_token(self.LINE_BREAK_TOKEN)
 
-                    next_token = self.tokenizer.encode(
-                        "Next, according to the tool response: ",
-                        add_special_tokens=False,
-                    )
-                    for token_id in next_token:
-                        seq.append_token(token_id)
-                    seq.append_token(self.LINE_BREAK_TOKEN)
+                    # next_token = self.tokenizer.encode(
+                    #     "Next, according to the tool response: ",
+                    #     add_special_tokens=False,
+                    # )
+                    # for token_id in next_token:
+                    #     seq.append_token(token_id)
+                    # seq.append_token(self.LINE_BREAK_TOKEN)
 
                     # 已添加工具调用结果，下一步继续生成AI的回复
                     # seq.append_token(self.IM_START_TOKEN)
