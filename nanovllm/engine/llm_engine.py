@@ -38,12 +38,14 @@ class LLMEngine:
         self.ps = []
         self.events = []
         ctx = mp.get_context("spawn")
+        # 启动多进程
         for i in range(1, config.tensor_parallel_size):
             event = ctx.Event()
             process = ctx.Process(target=ModelRunner, args=(config, i, event))
             process.start()
             self.ps.append(process)
             self.events.append(event)
+        # 主进程需要启动
         self.model_runner = ModelRunner(config, 0, self.events)
         self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
         config.eos = self.tokenizer.eos_token_id
@@ -70,6 +72,7 @@ class LLMEngine:
     def step(self):
         seqs, is_prefill = self.scheduler.schedule()
         token_ids = self.model_runner.call("run", seqs, is_prefill)
+        # 进行好处理，判断seq是否生成eos，如果接收到eos标志，就序列停止生成，并清空kv_cache
         self.scheduler.postprocess(seqs, token_ids)
 
         # 检查是否有序列包含工具调用
