@@ -15,6 +15,7 @@ from nanovllm.engine.model_runner import ModelRunner
 from nanovllm.tools.tool_executor import ToolExecutor
 
 from nanovllm.engine.sequence import SequenceStatus
+from nanovllm.engine.model_runner import lp
 
 
 class LLMEngine:
@@ -69,6 +70,7 @@ class LLMEngine:
         seq = Sequence(prompt, sampling_params)
         self.scheduler.add(seq)
 
+    # @lp
     def step(self):
         seqs, is_prefill = self.scheduler.schedule()
         token_ids = self.model_runner.call("run", seqs, is_prefill)
@@ -122,83 +124,56 @@ class LLMEngine:
                     current_text, seq.tool_call_hash_set
                 )
 
+                tool_call_token_ids = []
                 if tool_calls and results:
                     # 格式化工具执行结果，这种场景只可能有一个工具调用的结果
                     tool_results_text = self.tool_executor.format_tool_results(
                         [results[0]]
                     )
-
-                    # 添加工具调用结束标记
-                    # seq.append_token(self.IM_END_TOKEN)
                     # seq.append_token(self.LINE_BREAK_TOKEN)
-
-                    # 添加工具调用接口开始标记
-                    # seq.append_token(self.IM_START_TOKEN)
-                    # seq.append_token(self.TOOL_ROLE_TOKEN)
-                    seq.append_token(self.LINE_BREAK_TOKEN)
+                    tool_call_token_ids.append(self.LINE_BREAK_TOKEN)
 
                     # 添加工具结果开始标记
-                    seq.append_token(self.TOOL_RESPONSE_START_TOKEN)
-                    seq.append_token(self.LINE_BREAK_TOKEN)
+                    # seq.append_token(self.TOOL_RESPONSE_START_TOKEN)
+                    # seq.append_token(self.LINE_BREAK_TOKEN)
+                    tool_call_token_ids.append(self.TOOL_RESPONSE_START_TOKEN)
+                    tool_call_token_ids.append(self.LINE_BREAK_TOKEN)
 
                     # 将工具结果编码并添加到序列中
                     tool_result_tokens = self.tokenizer.encode(
                         tool_results_text, add_special_tokens=False
                     )
-                    for token_id in tool_result_tokens:
-                        seq.append_token(token_id)
+                    # for token_id in tool_result_tokens:
+                    #     seq.append_token(token_id)
+                    tool_call_token_ids.extend(tool_result_tokens)
 
                     # 添加工具结果结束标记
-                    seq.append_token(self.LINE_BREAK_TOKEN)
-                    seq.append_token(self.TOOL_RESPONSE_END_TOKEN)
-                    seq.append_token(self.LINE_BREAK_TOKEN)
-                    # seq.append_token(self.IM_END_TOKEN)
                     # seq.append_token(self.LINE_BREAK_TOKEN)
-
-                    # seq.append_token(self.IM_START_TOKEN)
-                    # seq.append_token(self.USER_TOKEN)
+                    # seq.append_token(self.TOOL_RESPONSE_END_TOKEN)
                     # seq.append_token(self.LINE_BREAK_TOKEN)
+                    tool_call_token_ids.append(self.LINE_BREAK_TOKEN)
+                    tool_call_token_ids.append(self.TOOL_RESPONSE_END_TOKEN)
+                    tool_call_token_ids.append(self.LINE_BREAK_TOKEN)
+                    
+                    seq.append_token_ids(tool_call_token_ids)
+                    self.scheduler.add_batch_decode_seq(seq)
+                    self.scheduler.remove_from_running(seq)
 
-                    # 添加用户提示词
-                    # user_tokens = self.tokenizer.encode(
-                    #     """Answer the question according to the tool response or if you don't have the information,
-                    #     you can call the tool again, but you should not call the same tool again""",
-                    #     add_special_tokens=False,
-                    # )
-                    # for token_id in user_tokens:
-                    #     seq.append_token(token_id)
-                    # seq.append_token(self.IM_END_TOKEN)
+                    # 重置序列状态为运行中，确保能继续生成
+                    # seq.status = SequenceStatus.RUNNING
+                    # self.scheduler.add_batch_decode_seq(seq)
+                else:
+                    # 同样的工具已经调用过，加入提示词继续生成
                     # seq.append_token(self.LINE_BREAK_TOKEN)
-
-                    # next_token = self.tokenizer.encode(
-                    #     "Next, according to the tool response: ",
-                    #     add_special_tokens=False,
-                    # )
-                    # for token_id in next_token:
-                    #     seq.append_token(token_id)
-                    # seq.append_token(self.LINE_BREAK_TOKEN)
-
-                    # 已添加工具调用结果，下一步继续生成AI的回复
                     # seq.append_token(self.IM_START_TOKEN)
                     # seq.append_token(self.ASSISTANT_TOKEN)
                     # seq.append_token(self.LINE_BREAK_TOKEN)
-
                     # seq.append_token(self.THINK_START_TOKEN)
                     # seq.append_token(self.LINE_BREAK_TOKEN)
-
-                    # 重置序列状态为运行中，确保能继续生成
-                    seq.status = SequenceStatus.RUNNING
-                else:
-                    # 同样的工具已经调用过，加入提示词继续生成
-                    seq.append_token(self.LINE_BREAK_TOKEN)
-                    seq.append_token(self.IM_START_TOKEN)
-                    seq.append_token(self.ASSISTANT_TOKEN)
-                    seq.append_token(self.LINE_BREAK_TOKEN)
-                    # seq.append_token(self.THINK_START_TOKEN)
-                    # seq.append_token(self.LINE_BREAK_TOKEN)
+                    seq.last_tokens = []
 
                 # 标记该序列已处理工具调用，避免重复处理
-                seq.tool_call_processed_begin = len(seq.completion_token_ids)
+                # seq.tool_call_processed_begin = len(seq.completion_token_ids)
 
     def is_finished(self):
         return self.scheduler.is_finished()

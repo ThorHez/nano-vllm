@@ -148,7 +148,7 @@ class ToolExecutor:
             被<tool_call></tool_call>包围的工具执行结果字符串
         """
         tool_calls = self.parse_tool_calls(text)
-
+        # print(f"text: {text}")
         tool_call_without_id = tool_calls[-1].to_dict()
         tool_call_without_id.pop("id")
 

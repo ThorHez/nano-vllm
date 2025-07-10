@@ -20,6 +20,7 @@ class Sequence:
         self.status = SequenceStatus.WAITING
         self.token_ids = copy(token_ids)
         self.last_token = token_ids[-1]
+        self.last_tokens = []
         self.num_tokens = len(self.token_ids)
         self.num_prompt_tokens = len(token_ids)
         self.num_cached_tokens = 0
@@ -73,14 +74,22 @@ class Sequence:
         self.token_ids.append(token_id)
         self.last_token = token_id
         self.num_tokens += 1
-
+        
+    def append_token_ids(self, token_ids: list[int]):
+        self.token_ids.extend(token_ids)
+        self.last_tokens = token_ids
+        self.last_token = token_ids[-1]
+        self.num_tokens += len(token_ids)
+        
+        
     def __getstate__(self):
         return (
             self.num_tokens,
             self.num_prompt_tokens,
             self.num_cached_tokens,
             self.block_table,
-            self.token_ids if self.num_completion_tokens == 0 else self.last_token,
+            self.last_tokens,
+            self.token_ids if self.num_completion_tokens == 0 or self.last_tokens else self.last_token,
         )
 
     def __setstate__(self, state):
@@ -89,8 +98,9 @@ class Sequence:
             self.num_prompt_tokens,
             self.num_cached_tokens,
             self.block_table,
+            self.last_tokens,
         ) = state[:-1]
-        if self.num_completion_tokens == 0:
+        if self.num_completion_tokens == 0 or self.last_tokens:
             self.token_ids = state[-1]
         else:
             self.last_token = state[-1]

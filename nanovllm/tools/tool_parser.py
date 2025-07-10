@@ -162,6 +162,29 @@ class ToolCallParser:
             tool_calls.append(tool_call)
 
         return tool_calls
+    
+    
+    def _parse_tool_call_format(self, json_content: str, available_tools: List[str], tool_calls: List[ToolCall]) -> List[ToolCall]:
+        """解析工具调用格式"""
+        data = json.loads(json_content.strip())
+        if "function" in data:
+            function_data = data["function"]
+            name = function_data.get("name", "")
+            arguments = function_data.get("arguments", {})
+            arguments.pop("toolbench_rapidapi_key", None)
+        else:
+            name = data.get("name", "")
+            arguments = data.get("arguments", {})
+
+        if available_tools and name not in available_tools:
+            return tool_calls
+
+        tool_call = ToolCall(
+            id=str(uuid.uuid4()), name=name, arguments=arguments
+        )
+        tool_calls.append(tool_call)
+        return tool_calls
+        
 
     def _parse_simple_xml_format(
         self, text: str, available_tools: List[str] = None
@@ -173,20 +196,10 @@ class ToolCallParser:
 
         for json_content in matches:
             try:
-                # 解析JSON内容
-                data = json.loads(json_content.strip())
-                name = data.get("name", "")
-                arguments = data.get("arguments", {})
-
-                if available_tools and name not in available_tools:
-                    continue
-
-                tool_call = ToolCall(
-                    id=str(uuid.uuid4()), name=name, arguments=arguments
-                )
-                tool_calls.append(tool_call)
+                self._parse_tool_call_format(json_content, available_tools, tool_calls)
             except (json.JSONDecodeError, KeyError):
-                continue
+                self._parse_tool_call_format(json_content.strip()[:-1], available_tools, tool_calls)
+                
 
         return tool_calls
 

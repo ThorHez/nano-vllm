@@ -10,6 +10,9 @@ from nanovllm.models.qwen3 import Qwen3ForCausalLM
 from nanovllm.layers.sampler import Sampler
 from nanovllm.utils.context import set_context, get_context, reset_context
 from nanovllm.utils.loader import load_model
+from line_profiler import LineProfiler
+
+lp = LineProfiler()
 
 
 class ModelRunner:
@@ -246,7 +249,7 @@ class ModelRunner:
         slot_mapping = []
         context_lens = []
         for seq in seqs:
-            input_ids.append(seq.last_token)
+            input_ids.append(seq.last_token) 
             positions.append(len(seq))
             context_lens.append(len(seq))
             slot_mapping.append(
@@ -304,6 +307,7 @@ class ModelRunner:
             graph.replay()
             return self.model.compute_logits(graph_vars["outputs"][:bs])
 
+    # @lp
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
         # 数据准备，所有进程执行相同的数据准备操作
         input_ids, positions = (

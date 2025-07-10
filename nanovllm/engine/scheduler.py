@@ -18,20 +18,52 @@ class Scheduler:
         self.waiting: deque[Sequence] = deque()
         # 用于存放等待等待decode的序列
         self.running: deque[Sequence] = deque()
+        
+        self.batch_decode_seqs: deque[Sequence] = deque()
 
     def is_finished(self):
-        return not self.waiting and not self.running
+        return not self.waiting and not self.running and not self.batch_decode_seqs
+        # return not self.waiting and not self.running
 
     def add(self, seq: Sequence):
         self.waiting.append(seq)
+        
+    
+    def add_batch_decode_seq(self, seq: Sequence):
+        self.batch_decode_seqs.append(seq)
+        
+        
+    def remove_from_running(self, seq: Sequence):
+        self.running.remove(seq)
+    
 
     def schedule(self) -> tuple[list[Sequence], bool]:
         # prefill
         scheduled_seqs = []
-        # todo 为什么需要设置单次最大的seq数量？
+        # 限制单次推理的序列数量，避免GPU显存不足
         num_seqs = 0
         num_batched_tokens = 0
-
+        
+        
+        while self.batch_decode_seqs and num_seqs < self.max_num_seqs:
+            seq = self.batch_decode_seqs[0]
+            if num_batched_tokens + len(
+                seq
+            ) > self.max_num_batched_tokens or not self.block_manager.can_allocate(seq):
+                break
+            num_seqs += 1
+            self.block_manager.allocate(seq)
+            # 实际需要计算的seq - 已经计算的序列（存放在kv_cache中）
+            num_batched_tokens += len(seq) - seq.num_cached_tokens
+            seq.status = SequenceStatus.RUNNING
+            self.batch_decode_seqs.popleft()
+            self.running.append(seq)
+            scheduled_seqs.append(seq)
+        if scheduled_seqs:
+            return scheduled_seqs, True
+        
+        
+        
         # 一次取出足够多的序列用于批量推理
         while self.waiting and num_seqs < self.max_num_seqs:
             seq = self.waiting[0]
